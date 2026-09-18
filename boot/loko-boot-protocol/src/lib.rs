@@ -12,9 +12,9 @@
 //!
 //! ## Status
 //!
-//! **Defined and compiling. Not yet exercised on hardware or in a virtual
-//! machine**, because this development environment has no emulator installed.
-//! See `documentation/STATUS.md`.
+//! **Defined and exercised.** A real bootloader fills this in and a real kernel
+//! validates it on every CI boot: 129 memory regions, a framebuffer and an ACPI
+//! pointer crossed it in the run recorded in `documentation/STATUS.md`.
 
 // `no_std` everywhere except under `cargo test`, where the test harness itself
 // needs std. The code under test is identical either way.

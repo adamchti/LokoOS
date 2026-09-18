@@ -167,7 +167,16 @@ fn setup_memory(info: &BootInfo) -> FrameAllocator<'static> {
     let regions =
         unsafe { core::slice::from_raw_parts(info.memory_map, info.memory_map_len as usize) };
 
-    let highest = regions.iter().map(|r| r.end()).max().unwrap_or(0);
+    // Only usable memory matters for this. A firmware map reaches far above
+    // installed RAM -- QEMU reports a PCI hole at 1 TiB -- so comparing against
+    // the highest address in the map would print a warning about losing a
+    // terabyte at every boot on a machine with 512 MiB.
+    let highest_usable = regions
+        .iter()
+        .filter(|r| r.kind.usable_at_handoff())
+        .map(|r| r.end())
+        .max()
+        .unwrap_or(0);
 
     // SAFETY: single-threaded early boot, before any other CPU is started, and
     // this is the only code that ever takes a reference to the bitmap.
@@ -181,16 +190,14 @@ fn setup_memory(info: &BootInfo) -> FrameAllocator<'static> {
         }
     };
 
-    // The allocator manages what its bitmap can describe, which may be less
-    // than the memory map reaches. Most of the difference is MMIO rather than
-    // RAM, so this is reported rather than warned about, and only when it
-    // actually exceeds what this build supports.
+    // The allocator manages what its bitmap can describe. Report only when that
+    // actually costs the machine memory it could otherwise have used.
     let managed = frames.total_frames() * FRAME_SIZE;
-    if highest > managed && managed >= MAX_MANAGED_MEMORY {
+    if highest_usable > managed {
         warn!(
             "memory",
-            "this device reports addresses up to {} GiB; this build manages the first {} GiB",
-            highest / (1024 * 1024 * 1024),
+            "{} MiB of usable memory sits above the first {} GiB and will not be used",
+            (highest_usable - managed) / (1024 * 1024),
             managed / (1024 * 1024 * 1024)
         );
     }

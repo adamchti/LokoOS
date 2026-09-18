@@ -18,14 +18,22 @@ thing to read.
 
 | | |
 |---|---|
-| Host test suite | 142 tests, all passing |
+| Host test suite | 144 tests, all passing |
 | Kernel | Builds to a valid higher-half ELF64, W^X enforced |
 | Bootloader | Builds to a valid PE32+ EFI application |
-| Has it booted? | **Not yet.** See [STATUS.md](documentation/STATUS.md) |
+| Bootable ISO | Built and verified on every push |
+| Has it booted? | **Yes** — QEMU with OVMF, on every push |
+| On real hardware? | Not yet. Nobody has tried |
 
-The boot path is written and compiles. It has never been run, because the
-machine it was developed on has no emulator. That gap is documented rather than
-papered over, and closing it is the next task.
+LokoOS starts, initialises and halts as designed. Firmware loads the ISO, the
+bootloader reads the kernel off the EFI system partition, builds page tables and
+switches to them, and the kernel comes up on the other side, takes ownership of
+physical memory and starts a heap. The serial log from the run that first proved
+it is in [STATUS.md](documentation/STATUS.md).
+
+It stops there, deliberately and loudly: there is no scheduler, no address-space
+manager and no storage stack, so there is nothing to hand control to. The kernel
+says exactly that on the serial console rather than pretending otherwise.
 
 ---
 

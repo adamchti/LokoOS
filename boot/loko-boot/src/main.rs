@@ -18,11 +18,12 @@
 //!
 //! ## Status
 //!
-//! **Compiles for `x86_64-unknown-uefi` and produces a valid EFI application.
-//! It has not been run on hardware or in a virtual machine**, because this
-//! development environment has no emulator. Every step below is written to be
-//! correct, and none of it has been observed working. See
-//! `documentation/STATUS.md`.
+//! **Works.** Verified booting under QEMU with OVMF on every push: firmware
+//! loads this image, it loads the kernel, and the kernel comes up on the other
+//! side. See `documentation/STATUS.md` for the serial log.
+//!
+//! Untested on real hardware, and untested on any machine other than the one
+//! CI emulates.
 
 #![no_std]
 #![no_main]

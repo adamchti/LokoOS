@@ -18,44 +18,77 @@ finished, and the code says so at the point where it stops.
 
 | | |
 |---|---|
-| Host test suite | **142 tests, all passing** |
+| Host test suite | **144 tests, all passing** |
 | Kernel | **Builds** to a valid higher-half ELF64 for `x86_64-unknown-none` |
 | Bootloader | **Builds** to a valid PE32+ EFI application for `x86_64-unknown-uefi` |
-| Booted on hardware or in an emulator | **No.** See "The honest gap" below |
+| Bootable ISO | **Yes.** Hybrid image, built and verified on every push |
+| Booted in an emulator | **Yes.** QEMU with OVMF, on every push |
+| Booted on real hardware | **No.** Nobody has tried |
 
-### The honest gap
+### LokoOS boots
 
-**LokoOS has never been booted.** The development machine this was built on has
-no emulator installed and no spare disk space to install one, so the boot path —
-the bootloader finding the kernel, loading it, switching page tables, and the
-kernel coming up on the other side — has been written and compiled but never
-observed working.
+As of 2026-09-18 LokoOS starts, initialises, and halts as designed. This is the
+serial log from the CI run that first proved it, trimmed of firmware noise:
 
-That is a real and significant gap, and nothing in this repository pretends
-otherwise. What *is* verified about the boot chain:
-
-- The kernel links to `0xFFFFFFFF80000000` with three `PT_LOAD` segments whose
-  permissions are `R-X`, `R--`, `RW-`. No segment is both writable and
-  executable. Check it yourself: `./tools/elfinfo.ps1 build/esp/EFI/LOKO/loko-kernel`
-- The kernel's `.bss` is correctly uncommitted on disk: the `RW-` segment's
-  memory size is 598,016 bytes against a file size of 4,416, so 580 KiB —
-  mostly the frame-allocator bitmap and the three emergency fault stacks —
-  costs nothing in the image.
-- The bootloader is a PE32+ image with subsystem 10, `EFI_APPLICATION`, which is
-  what firmware will load.
-- The frame allocator, the boot-info validator, the ELF size arithmetic and the
-  memory-map conversion are all exercised by host tests.
-
-What is **not** verified: that any of it works on a machine. To close this gap:
-
-```bash
-# Install QEMU and OVMF, then:
-./tools/build.ps1 image
-qemu-system-x86_64 -bios OVMF.fd -drive format=raw,file=fat:rw:build/esp -serial stdio
+```
+[ INFO]: LokoOS bootloader 0.1.0
+[ INFO]: stage 1: firmware initialised
+[ INFO]: stage 2: reading \EFI\LOKO\loko-kernel
+[ INFO]: kernel entry 0xffffffff80003890, 612 KiB across 0xffffffff80000000..0xffffffff80099000
+[ INFO]: stage 3: reserving memory
+[ INFO]: stage 4: querying hardware
+[ INFO]: framebuffer 1280x800 at 0x80000000
+[ INFO]: 512 MiB of RAM, framebuffer present, ACPI at 0x1fb7e014
+[ INFO]: stage 5: building page tables
+[ INFO]: page tables used 12 of 256 frames
+[ INFO]: stage 6: exiting boot services
+[INFO ] boot       LokoOS kernel 0.1.0
+[INFO ] boot       stage 5: kernel entered
+[INFO ] boot       protocol 0.1, 129 memory regions, physical window at 0xffff800000000000
+[WARN ] security   Secure Boot is off; this image was not verified
+[INFO ] boot       stage 6: descriptor tables
+[INFO ] graphics   framebuffer 1280x800 at 0x80000000
+[INFO ] boot       stage 7: physical memory
+[INFO ] boot       stage 8: kernel heap
+[INFO ] heap       1024 KiB at 0xffff800000100000
+[INFO ] memory     16384 MiB addressable, 461 MiB free, 0 KiB heap in use
+[INFO ] boot       stage 9: not implemented; no scheduler or storage stack yet
+[INFO ] boot       kernel initialised successfully and is halting
 ```
 
-The kernel's entire boot narration goes to the serial port, so `-serial stdio`
-shows exactly where it gets to.
+Firmware loads the hybrid ISO, the bootloader reads the kernel off the EFI
+system partition, loads it, builds page tables and switches to them, and the
+kernel comes up on the other side, validates what it was handed, brings up its
+descriptor tables, takes ownership of physical memory and starts a heap.
+
+`cargo xtask boot-test` runs this, and CI runs it on every push. It decides
+success from the serial log rather than from an exit status, because the kernel
+halts rather than exiting, and it reports which of the five boot stages was
+reached so a regression localises to a subsystem instead of being a timeout.
+
+### What is still unproven
+
+- **Real hardware.** Everything above is QEMU with OVMF. Firmware in the wild is
+  more varied and less forgiving than OVMF, and nobody has put this on a USB
+  stick and tried it. If you do, the serial log is the thing to capture.
+- **Any machine that is not 512 MiB, 1280x800 and one CPU.** That is what the
+  CI runner emulates. Other memory sizes, other framebuffer formats, no
+  framebuffer at all, and more than one core are all untested paths.
+- **Everything after stage 8.** There is no scheduler, no address-space manager
+  and no storage stack, so the kernel halts. It says so on the serial console.
+
+### What it took to get here
+
+Five CI runs, each of which localised the next real bug. Recorded because the
+failures are more instructive than the success:
+
+| Run | Outcome |
+|---|---|
+| 1 | ISO build failed: `10K0050F` is not a hexadecimal volume ID |
+| 2 | ISO built and verified; the boot test tripped on a non-idempotent rebuild |
+| 3 | Firmware loaded it; the bootloader died at stage 5 trying to map a 1 TiB PCI hole as if it were RAM |
+| 4 | Reached stage 6, then triple-faulted: the identity map was marked no-execute, so the instruction after `mov cr3` could not be fetched |
+| 5 | Booted |
 
 ---
 
@@ -84,10 +117,10 @@ Legend: **Implemented** (written, compiles, tested where testable) ·
 
 | Component | Status | Notes |
 |---|---|---|
-| UEFI bootloader (§6) | Partial | Loads, maps and jumps. **Never executed.** |
-| ELF loader | Implemented | Validates before loading; rejects W+X segments |
-| Page-table construction | Implemented | Kernel mapped per-segment; W^X enforced from first instruction |
-| Kernel entry and validation | Implemented | Rejects a bad boot info with a readable message |
+| UEFI bootloader (§6) | Implemented | Loads, maps and jumps. Verified booting in QEMU on every push |
+| ELF loader | Implemented | Validates before loading; rejects W+X segments. Verified on a real kernel image |
+| Page-table construction | Implemented | Kernel mapped per-segment; W^X enforced from the first instruction. 12 frames on a 512 MiB machine |
+| Kernel entry and validation | Implemented | Accepts a real boot info; rejects a bad one with a readable message |
 | GDT and TSS (§4) | Implemented | Separate IST stacks for double fault, page fault, NMI |
 | IDT and exception handlers (§4) | Implemented | Six handlers, each stopping with a plain-language message |
 | Kernel heap | Implemented | 1 MiB, placed in the physical-memory window |
@@ -188,17 +221,25 @@ These are real constraints in shipped code, not future work in disguise.
 
 ## What to build next, and why in this order
 
-1. **Boot it.** Everything below is guesswork until the boot chain has been
-   observed working once. This is the single highest-value next step and it
-   needs only QEMU and OVMF.
-2. **Timer and interrupt controller.** Nothing can be scheduled without a tick,
-   and ACPI parsing is the prerequisite for both.
-3. **Address-space manager.** Unlocks reclaiming boot memory, tearing down the
-   identity map, and the beginnings of process isolation.
-4. **Scheduler and the first userland thread.** Turns the syscall dispatch table
+~~Boot it.~~ Done, and every step below now has a working foundation to be
+tested against rather than reasoned about.
+
+1. **Timer and interrupt controller.** Nothing can be scheduled without a tick,
+   and ACPI parsing is the prerequisite for both. The RSDP is already found and
+   handed to the kernel; nothing parses it yet.
+2. **Address-space manager.** Unlocks reclaiming boot memory, tearing down the
+   low identity map, and the beginnings of process isolation. Both of those are
+   in the limitations list above.
+3. **Scheduler and the first userland thread.** Turns the syscall dispatch table
    from written code into running code.
-5. **Storage stack.** `lkofs-core` already decides who may do what; it needs a
+4. **Storage stack.** `lkofs-core` already decides who may do what; it needs a
    device to decide it about.
+
+Worth doing alongside, now that the boot test exists to catch regressions:
+
+- **Try it on real hardware.** The one large unknown left in the boot path.
+- **A glyph rasteriser for the early framebuffer**, so a stop screen says
+  something rather than showing a colour.
 
 Only then does the graphics stack become the right thing to work on. Building
 the desktop before the kernel can schedule would mean building it on a

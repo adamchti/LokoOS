@@ -44,8 +44,10 @@ exclude them. `xtask` does this; raw `cargo test --workspace` does not.
 
 **1. Do not claim something works that you have not seen work.**
 
-This repository has a boot path that compiles and has never run, and it says so
-in three places. If you write a subsystem you could not test, say so in its
+This repository carried a boot path that compiled and had never run, and said so
+in three places, until CI booted it. That is the shape to aim for: an honest
+"unverified" is fine, and it is what lets you tell later whether something
+actually started working. If you write a subsystem you could not test, say so in
 module documentation and in `STATUS.md`. That is not a failure. Presenting it as
 finished would be.
 
