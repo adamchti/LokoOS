@@ -185,11 +185,19 @@ fn load_and_start() -> Result<!, &'static str> {
             .map_err(paging::PagingError::message)?;
     }
 
-    // The low identity map, purely so that `mov cr3` does not fault on the
-    // instruction after it. The kernel tears this down once it is running from
-    // the higher half.
+    // The low identity map. This exists for exactly one instruction: the one
+    // fetched immediately after `mov cr3`, which still comes from the address
+    // this code is executing at. Without it the switch faults on its own next
+    // instruction.
+    //
+    // READ_EXECUTE, not READ_WRITE. `Permissions::READ_WRITE` sets the
+    // no-execute bit, and EFER.NXE is enabled a few lines below, so mapping
+    // this range non-executable makes the `cr3` load page-fault on the next
+    // instruction fetch with no handler installed, which is a triple fault and
+    // a silently reset machine. Nothing writes through an identity address
+    // between here and the jump, so read-execute keeps W^X intact.
     tables
-        .map_huge_range(0, 0, IDENTITY_MAPPED_BYTES, Permissions::READ_WRITE)
+        .map_huge_range(0, 0, IDENTITY_MAPPED_BYTES, Permissions::READ_EXECUTE)
         .map_err(paging::PagingError::message)?;
 
     log::info!(
@@ -381,35 +389,55 @@ fn map_kernel(
     Ok(())
 }
 
+/// Whether a firmware memory type describes installed RAM.
+///
+/// An allow-list, not a deny-list. The first attempt excluded only the two
+/// MMIO types and still came back with 64 GiB on a machine with 512 MiB,
+/// because firmware describes plenty of address space under other types.
+/// Naming what RAM *is* leaves no room for that.
+///
+/// `RESERVED` is excluded: it covers both firmware-reserved RAM and decorative
+/// holes, and the kernel has no reason to read either. `UNUSABLE` is excluded
+/// because it is memory that failed.
+const fn is_installed_ram(ty: MemoryType) -> bool {
+    matches!(
+        ty,
+        MemoryType::CONVENTIONAL
+            | MemoryType::LOADER_CODE
+            | MemoryType::LOADER_DATA
+            | MemoryType::BOOT_SERVICES_CODE
+            | MemoryType::BOOT_SERVICES_DATA
+            | MemoryType::RUNTIME_SERVICES_CODE
+            | MemoryType::RUNTIME_SERVICES_DATA
+            | MemoryType::ACPI_RECLAIM
+            | MemoryType::ACPI_NON_VOLATILE
+            | MemoryType::PERSISTENT_MEMORY
+    )
+}
+
 /// The highest physical address that installed memory reaches.
 ///
 /// Deliberately not the highest address in the firmware memory map. Firmware
-/// describes MMIO apertures far above installed RAM: on QEMU the 64-bit PCI
-/// hole sits at 1 TiB, and on real hardware it can sit higher. Mapping all of
-/// that would need a thousand page-directory tables to describe address space
-/// that holds nothing, which is what the first boot of this bootloader tried
-/// to do before running out of arena.
-///
-/// Anything that is not an MMIO window counts, including reserved and bad
-/// memory, so that the kernel can still read what firmware left behind.
+/// describes apertures far above installed RAM: on QEMU the 64-bit PCI hole
+/// sits at 1 TiB. Mapping all of that would need a thousand page-directory
+/// frames to describe address space holding nothing, which is what the first
+/// boot of this bootloader tried to do before running out of arena.
 fn highest_ram_address() -> Result<u64, &'static str> {
     let map = boot::memory_map(MemoryType::LOADER_DATA)
         .map_err(|_| "LokoOS couldn't read this device's memory layout.")?;
 
     let highest = map
         .entries()
-        .filter(|d| !matches!(d.ty, MemoryType::MMIO | MemoryType::MMIO_PORT_SPACE))
+        .filter(|d| is_installed_ram(d.ty))
         .map(|d| d.phys_start + d.page_count * PAGE_SIZE)
         .max()
         .unwrap_or(0);
 
-    // A second line of defence. If some firmware reports a decorative region
-    // near the top of the address space under a type that is not MMIO, the
-    // clamp keeps the page tables finite and the kernel simply does not see
-    // memory above the limit, which it reports at boot.
+    // A second line of defence, in case some firmware reports something
+    // enormous under a type on the allow-list. The kernel reports memory above
+    // the limit as unmanaged rather than failing to start.
     Ok(highest.min(MAX_MAPPED_PHYSICAL))
 }
-
 /// Asks the firmware for a linear framebuffer, or reports that there is none.
 fn find_framebuffer() -> Framebuffer {
     let Ok(handle) = boot::get_handle_for_protocol::<GraphicsOutput>() else {
