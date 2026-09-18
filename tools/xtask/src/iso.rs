@@ -188,6 +188,11 @@ fn build_esp_image(esp_tree: &Path, out_dir: &Path) -> Result<PathBuf, String> {
     let size = size.div_ceil(1024 * 1024) * 1024 * 1024;
 
     let path = out_dir.join("esp.img");
+    // `mkfs.vfat -C` creates the file and refuses to overwrite one that is
+    // already there, so a second run in the same build directory would fail.
+    // Removing it first makes the command idempotent, which matters because
+    // `boot-test` builds the ISO again on top of whatever `iso` left behind.
+    let _ = fs::remove_file(&path);
     let image = path.to_string_lossy().to_string();
     let blocks = (size / 1024).to_string();
 
@@ -251,6 +256,8 @@ pub fn build(esp_tree: &Path, out_dir: &Path, version: &str) -> Result<PathBuf, 
         .map_err(|e| format!("could not stage the EFI system partition: {e}"))?;
 
     let iso = out_dir.join(format!("lokoos-{version}-x86_64.iso"));
+    // Same reason as esp.img: a rebuild must not trip over the last one.
+    let _ = fs::remove_file(&iso);
     let iso_string = iso.to_string_lossy().to_string();
     let root_string = iso_root.to_string_lossy().to_string();
 
