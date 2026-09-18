@@ -125,9 +125,17 @@ pub unsafe extern "C" fn _start(boot_info: *const BootInfo) -> ! {
             info.framebuffer.height,
             info.framebuffer.base
         );
-        // SAFETY: the bootloader maps the framebuffer before handing over, and
-        // `validate` has confirmed the structure describing it is well formed.
-        unsafe { framebuffer::init(info.framebuffer) };
+        // `BootInfo` carries the framebuffer at its physical address, because
+        // that is what the frame allocator has to reserve. Drawing needs the
+        // address in the physical-memory window instead: the identity map that
+        // makes the raw address work is temporary, and code that depends on it
+        // would break the moment the address-space manager tears it down.
+        let mut surface = info.framebuffer;
+        surface.base += info.physical_memory_offset;
+        // SAFETY: the bootloader maps the framebuffer into the physical-memory
+        // window before handing over, and `validate` has confirmed the
+        // structure describing it is well formed.
+        unsafe { framebuffer::init(surface) };
     } else {
         info!("graphics", "no framebuffer; serial only");
     }
@@ -160,14 +168,6 @@ fn setup_memory(info: &BootInfo) -> FrameAllocator<'static> {
         unsafe { core::slice::from_raw_parts(info.memory_map, info.memory_map_len as usize) };
 
     let highest = regions.iter().map(|r| r.end()).max().unwrap_or(0);
-    if highest > MAX_MANAGED_MEMORY {
-        warn!(
-            "memory",
-            "this device has more memory than this build can manage; {} MiB above {} GiB will go unused",
-            (highest - MAX_MANAGED_MEMORY) / (1024 * 1024),
-            MAX_MANAGED_MEMORY / (1024 * 1024 * 1024)
-        );
-    }
 
     // SAFETY: single-threaded early boot, before any other CPU is started, and
     // this is the only code that ever takes a reference to the bitmap.
@@ -180,6 +180,20 @@ fn setup_memory(info: &BootInfo) -> FrameAllocator<'static> {
             fail("LokoOS could not start: this device's memory could not be set up.");
         }
     };
+
+    // The allocator manages what its bitmap can describe, which may be less
+    // than the memory map reaches. Most of the difference is MMIO rather than
+    // RAM, so this is reported rather than warned about, and only when it
+    // actually exceeds what this build supports.
+    let managed = frames.total_frames() * FRAME_SIZE;
+    if highest > managed && managed >= MAX_MANAGED_MEMORY {
+        warn!(
+            "memory",
+            "this device reports addresses up to {} GiB; this build manages the first {} GiB",
+            highest / (1024 * 1024 * 1024),
+            managed / (1024 * 1024 * 1024)
+        );
+    }
 
     // The kernel image, the boot info, and the framebuffer are in use right
     // now. Handing any of them out would corrupt the running system.

@@ -65,6 +65,13 @@ const MEMORY_MAP_PAGES: usize = 8;
 /// survives its own next instruction.
 const IDENTITY_MAPPED_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
+/// The most physical address space the offset window will ever cover.
+///
+/// 64 GiB costs 64 page-directory frames to map with 2 MiB pages, which the
+/// arena can afford. Memory above this is not mapped and the kernel reports it
+/// as unmanaged rather than failing to start.
+const MAX_MAPPED_PHYSICAL: u64 = 64 * 1024 * 1024 * 1024;
+
 #[entry]
 fn main() -> Status {
     // Installs the logger and the allocator. Both stop working at
@@ -121,10 +128,15 @@ fn load_and_start() -> Result<!, &'static str> {
     log::info!("stage 4: querying hardware");
     let framebuffer = find_framebuffer();
     let rsdp = find_acpi_rsdp();
-    let highest_physical = highest_physical_address()?;
+    let highest_ram = highest_ram_address()?;
     log::info!(
-        "{} MiB of physical address space, ACPI at {:#x}",
-        highest_physical / (1024 * 1024),
+        "{} MiB of RAM, framebuffer {}, ACPI at {:#x}",
+        highest_ram / (1024 * 1024),
+        if framebuffer.is_present() {
+            "present"
+        } else {
+            "absent"
+        },
         rsdp
     );
 
@@ -141,15 +153,37 @@ fn load_and_start() -> Result<!, &'static str> {
         kernel_physical.as_ptr() as u64,
     )?;
 
-    // All of physical memory, so the kernel can reach any frame.
+    // All of RAM, so the kernel can reach any frame without first building the
+    // page tables it would need in order to build page tables.
     tables
         .map_huge_range(
             DEFAULT_PHYSICAL_MEMORY_OFFSET,
             0,
-            highest_physical,
+            highest_ram,
             Permissions::READ_WRITE,
         )
         .map_err(paging::PagingError::message)?;
+
+    // The framebuffer, which is MMIO and therefore sits outside the RAM range
+    // just mapped. Without this the kernel could only reach it through the
+    // identity map, which is supposed to be temporary.
+    //
+    // Lenient, because on a machine whose RAM is remapped above the PCI hole
+    // the framebuffer address can fall inside the range already mapped. A
+    // conflict there is benign by construction: both mappings are the same
+    // physical address at the same offset.
+    if framebuffer.is_present() {
+        let base = framebuffer.base & !(paging::HUGE_PAGE_SIZE - 1);
+        let length = framebuffer.size + (framebuffer.base - base);
+        tables
+            .map_huge_range_lenient(
+                DEFAULT_PHYSICAL_MEMORY_OFFSET + base,
+                base,
+                length,
+                Permissions::READ_WRITE,
+            )
+            .map_err(paging::PagingError::message)?;
+    }
 
     // The low identity map, purely so that `mov cr3` does not fault on the
     // instruction after it. The kernel tears this down once it is running from
@@ -347,16 +381,33 @@ fn map_kernel(
     Ok(())
 }
 
-/// The highest physical address any memory descriptor reaches.
-fn highest_physical_address() -> Result<u64, &'static str> {
+/// The highest physical address that installed memory reaches.
+///
+/// Deliberately not the highest address in the firmware memory map. Firmware
+/// describes MMIO apertures far above installed RAM: on QEMU the 64-bit PCI
+/// hole sits at 1 TiB, and on real hardware it can sit higher. Mapping all of
+/// that would need a thousand page-directory tables to describe address space
+/// that holds nothing, which is what the first boot of this bootloader tried
+/// to do before running out of arena.
+///
+/// Anything that is not an MMIO window counts, including reserved and bad
+/// memory, so that the kernel can still read what firmware left behind.
+fn highest_ram_address() -> Result<u64, &'static str> {
     let map = boot::memory_map(MemoryType::LOADER_DATA)
         .map_err(|_| "LokoOS couldn't read this device's memory layout.")?;
+
     let highest = map
         .entries()
+        .filter(|d| !matches!(d.ty, MemoryType::MMIO | MemoryType::MMIO_PORT_SPACE))
         .map(|d| d.phys_start + d.page_count * PAGE_SIZE)
         .max()
         .unwrap_or(0);
-    Ok(highest)
+
+    // A second line of defence. If some firmware reports a decorative region
+    // near the top of the address space under a type that is not MMIO, the
+    // clamp keeps the page tables finite and the kernel simply does not see
+    // memory above the limit, which it reports at boot.
+    Ok(highest.min(MAX_MAPPED_PHYSICAL))
 }
 
 /// Asks the firmware for a linear framebuffer, or reports that there is none.

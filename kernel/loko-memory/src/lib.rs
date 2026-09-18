@@ -121,16 +121,28 @@ impl<'a> FrameAllocator<'a> {
         regions: &[MemoryRegion],
     ) -> Result<Self, MemoryError> {
         let highest = regions.iter().map(|r| r.end()).max().unwrap_or(0);
-        let frames = highest / FRAME_SIZE;
+
+        // The bitmap decides how much can be managed, not the memory map.
+        //
+        // Firmware describes MMIO apertures far above installed RAM: on QEMU
+        // the 64-bit PCI hole sits at 1 TiB. Sizing from the map alone would
+        // demand a 32 MiB bitmap to describe address space holding nothing, and
+        // the allocator would refuse to start at all. Sizing from the bitmap
+        // instead means the allocator manages exactly what it can describe, and
+        // the caller compares `total_frames` against the map to report whatever
+        // was left out.
+        let describable = (bitmap.len() as u64).saturating_mul(64);
+        let frames = (highest / FRAME_SIZE).min(describable);
+
         let mut allocator = FrameAllocator::new(bitmap, FrameNumber(0), frames)?;
 
         for region in regions.iter().filter(|r| r.kind.usable_at_handoff()) {
             let first = FrameNumber::containing(region.start);
             let count = region.len / FRAME_SIZE;
             for i in 0..count {
-                // A region beyond the managed range is skipped rather than
-                // treated as an error: firmware maps sometimes describe memory
-                // holes above the highest usable address.
+                // A frame beyond the managed range is skipped rather than
+                // treated as an error: that is the normal case for a firmware
+                // map that runs past what the bitmap covers.
                 let _ = allocator.release(FrameNumber(first.0 + i));
             }
         }
@@ -601,6 +613,42 @@ mod tests {
                 run.0 + i
             );
         }
+        assert!(a.audit());
+    }
+
+    #[test]
+    fn a_memory_map_reaching_into_mmio_does_not_defeat_the_allocator() {
+        // The regression this exists for. QEMU reports a 64-bit PCI hole at
+        // 1 TiB, and the first version of this function sized the allocator
+        // from the highest address in the map. That demanded a 32 MiB bitmap to
+        // describe address space holding nothing, so the allocator refused to
+        // start and the kernel died at stage 7 of boot.
+        const TIB: u64 = 1024 * 1024 * 1024 * 1024;
+        let map = [
+            region(0, FRAME_SIZE * 256, MemoryKind::Usable),
+            region(TIB, FRAME_SIZE * 16, MemoryKind::Reserved),
+        ];
+
+        // A bitmap sized for 16 MiB of RAM, far less than the map reaches.
+        let managed_frames = 16 * 1024 * 1024 / FRAME_SIZE;
+        let mut bits = vec![0u64; bitmap_words_for(managed_frames)];
+
+        let a = FrameAllocator::from_memory_map(&mut bits, &map)
+            .expect("an MMIO aperture must not stop the allocator from starting");
+
+        assert_eq!(a.total_frames(), managed_frames);
+        assert_eq!(a.free_frames(), 256, "the usable region is still available");
+        assert!(a.audit());
+    }
+
+    #[test]
+    fn the_allocator_never_manages_more_than_its_bitmap_describes() {
+        let map = [region(0, FRAME_SIZE * 10_000, MemoryKind::Usable)];
+        let mut bits = vec![0u64; 4]; // 256 frames
+        let a = FrameAllocator::from_memory_map(&mut bits, &map).unwrap();
+        assert_eq!(a.total_frames(), 256);
+        assert_eq!(a.free_frames(), 256);
+        assert_eq!(a.is_allocated(FrameNumber(256)), None);
         assert!(a.audit());
     }
 }

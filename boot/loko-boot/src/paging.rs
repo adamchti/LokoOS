@@ -269,6 +269,29 @@ impl PageTables {
         Ok(())
     }
 
+    /// Like [`PageTables::map_huge_range`], but treats an existing mapping as
+    /// success rather than as a conflict.
+    ///
+    /// Only for ranges where an overlap is known to be harmless because the
+    /// existing entry maps the same physical address. The strict version stays
+    /// the default so that an accidental double mapping is still an error.
+    pub fn map_huge_range_lenient(
+        &mut self,
+        virtual_base: u64,
+        physical_base: u64,
+        length: u64,
+        permissions: Permissions,
+    ) -> Result<(), PagingError> {
+        let pages = length.div_ceil(HUGE_PAGE_SIZE);
+        for i in 0..pages {
+            let offset = i * HUGE_PAGE_SIZE;
+            match self.map_huge_page(virtual_base + offset, physical_base + offset, permissions) {
+                Ok(()) | Err(PagingError::Conflict) => {}
+                Err(other) => return Err(other),
+            }
+        }
+        Ok(())
+    }
     /// Maps `[physical_base, physical_base + length)` at `virtual_base` using
     /// 4 KiB pages, rounding the length up.
     pub fn map_range(
