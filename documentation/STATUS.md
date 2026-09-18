@@ -37,8 +37,10 @@ otherwise. What *is* verified about the boot chain:
 - The kernel links to `0xFFFFFFFF80000000` with three `PT_LOAD` segments whose
   permissions are `R-X`, `R--`, `RW-`. No segment is both writable and
   executable. Check it yourself: `./tools/elfinfo.ps1 build/esp/EFI/LOKO/loko-kernel`
-- The kernel's `.bss` (596 KiB, mostly the frame-allocator bitmap) is correctly
-  uncommitted on disk: the `RW-` segment's memory size exceeds its file size.
+- The kernel's `.bss` is correctly uncommitted on disk: the `RW-` segment's
+  memory size is 598,016 bytes against a file size of 4,416, so 580 KiB —
+  mostly the frame-allocator bitmap and the three emergency fault stacks —
+  costs nothing in the image.
 - The bootloader is a PE32+ image with subsystem 10, `EFI_APPLICATION`, which is
   what firmware will load.
 - The frame allocator, the boot-info validator, the ELF size arithmetic and the
