@@ -1,0 +1,19 @@
+[package]
+name = "loko-boot-protocol"
+description = "The layout-stable structure the LokoOS bootloader hands to the kernel."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bitflags = { workspace = true }
+
+[features]
+default = []
+std = []
+
+[lints.rust]
+missing_docs = "warn"

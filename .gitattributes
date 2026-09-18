@@ -1,0 +1,19 @@
+# LokoOS is developed on Windows, Linux and macOS, and cross-compiled for
+# targets that have no line-ending opinion at all. Normalising to LF in the
+# repository keeps diffs clean and keeps the linker script and shell scripts
+# working when a Windows checkout is copied to a Linux build machine.
+* text=auto eol=lf
+
+# Binary formats that must never be line-ending translated.
+*.efi   binary
+*.img   binary
+*.iso   binary
+*.png   binary
+*.ico   binary
+*.gguf  binary
+*.loko  binary
+
+# Cargo.lock is committed: this workspace produces binaries, and a kernel whose
+# dependency versions float is a kernel that can change behaviour without a
+# commit. Marking it as generated keeps it out of review diffs.
+Cargo.lock linguist-generated=true

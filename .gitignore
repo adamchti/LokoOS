@@ -1,0 +1,28 @@
+# Build output
+/target/
+**/target/
+/build/out/
+/build/esp/
+/build/*.img
+/build/*.iso
+
+# Toolchain / editor
+.vscode/
+.idea/
+*.swp
+
+# OS junk
+Thumbs.db
+.DS_Store
+
+# Local developer overrides
+.cargo/config.local.toml
+/tools/local/
+
+# Downloaded third-party compatibility runtimes are never vendored into git.
+# See documentation/architecture/compatibility.md
+/compatibility/windows/vendor/
+/compatibility/mac/vendor/
+
+# AI model weights are downloaded on demand, never committed.
+/apps/loko-ai/models/

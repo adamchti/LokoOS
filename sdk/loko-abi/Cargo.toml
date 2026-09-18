@@ -1,0 +1,22 @@
+[package]
+name = "loko-abi"
+description = "The stable LokoOS system-call ABI: numbers, argument layout, handles and error codes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+bitflags = { workspace = true }
+
+[features]
+default = ["std"]
+# `std` only adds trait impls (Display, Error) for host-side tooling and tests.
+# The kernel and freestanding userland build with `default-features = false`.
+std = []
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "deny"

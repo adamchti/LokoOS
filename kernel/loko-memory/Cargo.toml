@@ -1,0 +1,16 @@
+[package]
+name = "loko-memory"
+description = "Physical frame allocation and address arithmetic for the LokoOS kernel."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+loko-boot-protocol = { workspace = true }
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_op_in_unsafe_fn = "deny"

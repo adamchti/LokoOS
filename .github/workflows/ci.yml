@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # A warning that only appears locally is a warning nobody fixes.
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  check:
+    name: fmt, clippy, tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the channel, components and targets, so there
+      # is nothing to specify here. If CI and a laptop ever disagree about the
+      # toolchain, that file is the single place to look.
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@v2
+
+      # One command, the same one a contributor runs. CI that runs something
+      # different from `cargo xtask check` is CI that fails for reasons nobody
+      # can reproduce.
+      - name: cargo xtask check
+        run: cargo xtask check
+
+      - name: Report the base-OS size budget
+        run: cargo xtask size --release
+
+      - name: Verify the kernel image
+        shell: pwsh
+        run: ./tools/elfinfo.ps1 target/x86_64-unknown-none/debug/loko-kernel
+
+      - name: Lay out an EFI system partition
+        run: cargo xtask image
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lokoos-esp
+          path: build/esp/
+          if-no-files-found: error

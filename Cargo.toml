@@ -1,0 +1,63 @@
+[workspace]
+resolver = "2"
+members = [
+    "boot/loko-boot",
+    "boot/loko-boot-protocol",
+    "filesystem/lkofs-core",
+    "kernel/loko-kernel",
+    "kernel/loko-memory",
+    "sdk/loko-abi",
+    "security/loko-security",
+    "tools/xtask",
+]
+
+# xtask and lokopkg build for the host; everything else is cross-compiled.
+# `cargo build` at the workspace root would try to build freestanding crates
+# for the host, so the default members are the host-side tools only.
+default-members = ["tools/xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "Apache-2.0"
+repository = "https://github.com/lokoos/lokoos"
+authors = ["The LokoOS Authors"]
+
+[workspace.dependencies]
+# Internal crates
+loko-abi = { path = "sdk/loko-abi", default-features = false }
+loko-boot-protocol = { path = "boot/loko-boot-protocol", default-features = false }
+loko-memory = { path = "kernel/loko-memory" }
+# `lkofs-core` and `loko-security` are workspace members but are not yet
+# depended on by anything: the subsystems that will consult them (the storage
+# stack, the application loader) do not exist. Cargo warns about an unused
+# workspace dependency, so they are listed by path at the point of use instead.
+
+# Freestanding building blocks. These are deliberately few: every dependency in
+# the kernel is a dependency of the trusted computing base. See
+# documentation/architecture/adr/0003-dependency-policy.md
+bitflags = { version = "2.6", default-features = false }
+spin = { version = "0.9", default-features = false, features = ["spin_mutex", "once", "lazy"] }
+# `instructions` gives the privileged-instruction wrappers; `abi_x86_interrupt`
+# is what makes `extern "x86-interrupt" fn` assignable to an IDT entry. Both are
+# non-default, so they are named explicitly rather than inherited.
+x86_64 = { version = "0.15", default-features = false, features = [
+    "instructions",
+    "abi_x86_interrupt",
+] }
+uart_16550 = "0.3"
+linked_list_allocator = "0.10"
+
+[profile.release]
+# The kernel is shipped in release mode. Overflow checks stay on: a silent
+# wraparound in an allocator or a page-table index is a security bug, and the
+# cost is a few cycles on paths that are not hot.
+overflow-checks = true
+debug = true
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+panic = "abort"

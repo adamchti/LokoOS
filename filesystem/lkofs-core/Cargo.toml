@@ -1,0 +1,23 @@
+[package]
+name = "lkofs-core"
+description = "The LKOFS path model, root taxonomy and access policy. Pure logic, no I/O."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+loko-abi = { workspace = true }
+
+[features]
+default = ["std"]
+# `alloc` gives owned paths; `std` additionally enables Display/Error impls and
+# the host-side test suite. The kernel builds with `alloc` only.
+std = ["alloc", "loko-abi/std"]
+alloc = []
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"

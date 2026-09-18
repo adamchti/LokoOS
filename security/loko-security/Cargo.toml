@@ -1,0 +1,20 @@
+[package]
+name = "loko-security"
+description = "Application permissions, package trust, and the rules for when LokoOS asks the user."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+loko-abi = { workspace = true, default-features = false }
+
+[features]
+default = ["std"]
+std = ["loko-abi/std"]
+
+[lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"

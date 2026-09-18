@@ -1,0 +1,8 @@
+[toolchain]
+# Nightly is required for `-Z build-std`, which we use to build `core` and
+# `alloc` for targets rustup does not ship a precompiled `rust-std` for.
+# Pinned so that a toolchain update is a reviewed commit, not a surprise.
+channel = "nightly"
+components = ["rust-src", "llvm-tools", "rustfmt", "clippy"]
+targets = ["x86_64-unknown-none", "x86_64-unknown-uefi"]
+profile = "minimal"

@@ -1,0 +1,53 @@
+# LokoOS cargo configuration.
+#
+# The workspace holds three kinds of crate:
+#   * freestanding kernel-side crates  -> x86_64-unknown-none
+#   * the UEFI bootloader              -> x86_64-unknown-uefi
+#   * host tools (xtask, lokopkg)      -> the host triple
+#
+# Cargo has one `build.target` per invocation, so the target is selected per
+# command rather than globally. `cargo xtask` wraps the common combinations.
+
+[alias]
+xtask = "run --package xtask --"
+# Convenience aliases mirroring what xtask does, for when you want raw cargo.
+kernel = "build --package loko-kernel --target x86_64-unknown-none"
+bootloader = "build --package loko-boot --target x86_64-unknown-uefi"
+
+# NOTE: `-Z build-std` is deliberately NOT enabled. rustup ships a precompiled
+# `rust-std` for both x86_64-unknown-none and x86_64-unknown-uefi, so building
+# core from source would only make builds slower and pin us to nightly for a
+# reason we do not have. See documentation/architecture/adr/0002-targets.md.
+
+[target.x86_64-unknown-none]
+rustflags = [
+    # The kernel runs in the higher half with its own page tables; position
+    # dependent code keeps relocation out of the early boot path.
+    "-C", "relocation-model=static",
+    # A kernel must never use the red zone: an interrupt can fire at any
+    # instruction and would clobber it.
+    "-C", "force-frame-pointers=yes",
+]
+
+[target.x86_64-unknown-uefi]
+rustflags = [
+    "-C", "relocation-model=pic",
+]
+
+# Host testing on Windows without Visual Studio.
+#
+# The default Windows host target (x86_64-pc-windows-msvc) needs link.exe and
+# the Windows SDK. LokoOS's own code needs neither — nothing in this workspace
+# is Windows-specific — so a developer without Visual Studio can run the host
+# test suite against x86_64-pc-windows-gnu instead, where rustup's `rust-mingw`
+# component supplies the import libraries and `rust-lld` does the linking.
+#
+# `tools/build.ps1` picks the toolchain automatically. These flags are what make
+# that work.
+[target.x86_64-pc-windows-gnu]
+rustflags = [
+    "-Z", "unstable-options",
+    "-C", "linker=rust-lld",
+    "-C", "linker-flavor=gnu-lld",
+    "-C", "link-self-contained=y",
+]

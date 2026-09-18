@@ -1,0 +1,29 @@
+[package]
+name = "loko-kernel"
+description = "The LokoOS kernel."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "loko-kernel"
+path = "src/main.rs"
+test = false
+bench = false
+doctest = false
+
+[dependencies]
+loko-abi = { workspace = true, default-features = false }
+loko-boot-protocol = { workspace = true }
+loko-memory = { workspace = true }
+
+spin = { workspace = true }
+uart_16550 = { workspace = true }
+linked_list_allocator = { workspace = true }
+x86_64 = { workspace = true }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"

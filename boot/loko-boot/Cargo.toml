@@ -1,0 +1,29 @@
+[package]
+name = "loko-boot"
+description = "The LokoOS UEFI bootloader."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "loko-boot"
+path = "src/main.rs"
+test = false
+bench = false
+doctest = false
+
+[dependencies]
+loko-boot-protocol = { workspace = true }
+log = { version = "0.4", default-features = false }
+uefi = { version = "0.40", default-features = false, features = [
+    "alloc",
+    "global_allocator",
+    "logger",
+    "panic_handler",
+] }
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
