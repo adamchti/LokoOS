@@ -16,7 +16,8 @@ and is honest about where the sequence currently stops.
 | 9 | Scheduler, address spaces, storage | **Not started** |
 | 10–14 | Graphics, window manager, desktop, AI services, user session | Not started |
 
-**None of this has been observed running.** See [STATUS.md](../STATUS.md).
+**Stages 1 to 8 are verified running** under QEMU with OVMF, on every push. The
+serial log is in [STATUS.md](../STATUS.md). Real hardware is still untried.
 
 ---
 
@@ -76,15 +77,27 @@ Three mappings, in one fresh four-level table:
    not executable. **W^X holds from the first instruction the kernel executes**,
    not from some later hardening step.
 
-2. **All of physical memory** at `0xFFFF800000000000`, with 2 MiB pages,
-   read-write and no-execute.
+2. **All installed RAM** at `0xFFFF800000000000`, with 2 MiB pages, read-write
+   and no-execute. Installed RAM, not the whole address space: firmware
+   describes apertures far above memory — QEMU puts a PCI hole at 1 TiB — and
+   mapping those would need a thousand page-directory frames to describe
+   address space that holds nothing. The framebuffer is MMIO and therefore
+   outside that range, so it is mapped separately.
 
-3. **The low 4 GiB, identity-mapped.** This exists for exactly one reason: the
-   instruction after `mov cr3` is fetched from the address it was already
-   executing at, which is a low identity address. Without this mapping the
-   switch faults on its own next instruction. The kernel is supposed to drop
-   this once it is running from the higher half, and currently does not — see
-   [STATUS.md](../STATUS.md).
+3. **The low 4 GiB, identity-mapped, read-execute.** This exists for exactly one
+   reason: the instruction after `mov cr3` is fetched from the address it was
+   already executing at, which is a low identity address. Without this mapping
+   the switch faults on its own next instruction.
+
+   **Read-execute, not read-write.** Marking it no-execute makes that same
+   instruction fetch fault with no handler installed, which is a triple fault
+   and a machine that silently resets. This cost one CI run to find and is the
+   single least obvious thing in the boot path. Nothing writes through an
+   identity address between the `cr3` load and the jump, so read-execute keeps
+   W^X intact.
+
+   The kernel is supposed to drop this mapping once it is running from the
+   higher half, and currently does not — see [STATUS.md](../STATUS.md).
 
 Intermediate entries are always writable and always executable. On x86-64 the
 effective permission is the AND of the writable bits and the OR of the
