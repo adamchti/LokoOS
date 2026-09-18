@@ -168,9 +168,10 @@ These are real constraints in shipped code, not future work in disguise.
    address-space manager.
    *Where:* `boot/loko-boot/src/main.rs`, `IDENTITY_MAPPED_BYTES`.
 
-5. **`xtask image` produces a directory, not a bootable disk image.** Making a
-   `.img` needs a FAT32 formatter. Copying the tree onto an already-formatted
-   ESP works.
+5. **An ISO can only be built where `xorriso`, `mtools` and `dosfstools` exist.**
+   That rules out Windows, so `cargo xtask iso` fails there with a message
+   saying which tools are missing rather than producing a broken image. CI
+   builds the ISO on every push and publishes it as an artifact.
 
 6. **Secure Boot is reported, not performed.** The boot protocol carries a
    `SECURE_BOOT` flag and the kernel logs whether it is set, but the bootloader

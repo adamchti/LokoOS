@@ -1,10 +1,9 @@
 # Build output
 /target/
 **/target/
-/build/out/
-/build/esp/
-/build/*.img
-/build/*.iso
+# Everything under build/ is generated: the ESP tree, the FAT image, the ISO,
+# the iso_root staging directory and the QEMU boot-test scratch.
+/build/
 
 # Toolchain / editor
 .vscode/

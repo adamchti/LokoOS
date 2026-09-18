@@ -1,0 +1,84 @@
+name: ISO
+
+# Builds a bootable LokoOS ISO and then boots it.
+#
+# The second half is the point. Every other check in this repository tests code
+# that can be reasoned about on a host; this one tests the part that cannot be:
+# firmware handing control to the bootloader, the bootloader loading the kernel
+# and switching page tables, and the kernel surviving on the other side.
+#
+# The tooling this needs -- xorriso, mtools, dosfstools, QEMU, OVMF -- does not
+# exist on Windows in a usable form, which is why the ISO is built here rather
+# than on a developer machine.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # OVMF under TCG, with no hardware virtualisation on a shared runner, takes a
+  # while to reach the boot device. Generous, because a flaky timeout on the
+  # one test that proves the system boots would be worse than a slow job.
+  LOKO_BOOT_TIMEOUT_SECS: "240"
+
+jobs:
+  iso:
+    name: Build and boot
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install image and emulation tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dosfstools mtools xorriso qemu-system-x86 ovmf
+
+      # rust-toolchain.toml pins the channel, components and targets. Nothing to
+      # specify here, and nothing that can drift from a developer machine.
+      - name: Show the pinned toolchain
+        run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the ISO
+        run: cargo xtask iso --release
+
+      - name: Boot it under QEMU
+        run: cargo xtask boot-test --release
+
+      - name: Checksum
+        run: |
+          cd build
+          sha256sum lokoos-*.iso esp.img | tee SHA256SUMS
+          ls -lh lokoos-*.iso
+
+      # `always()`, so that a failed boot still hands back the serial log. A
+      # boot failure with no serial output is a bug report nobody can act on.
+      - name: Upload the ISO and the boot log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lokoos-iso
+          path: |
+            build/lokoos-*.iso
+            build/SHA256SUMS
+            build/boot-test/serial.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish a release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            build/lokoos-*.iso
+            build/SHA256SUMS

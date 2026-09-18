@@ -47,6 +47,8 @@ papered over, and closing it is the next task.
 cargo xtask test      # host test suite
 cargo xtask build     # kernel and bootloader
 cargo xtask image     # lay out an EFI system partition in build/esp
+cargo xtask iso       # build a bootable hybrid ISO in build/
+cargo xtask boot-test # build the ISO and boot it under QEMU
 cargo xtask size      # measure against the 2 GB base-OS budget
 cargo xtask check     # what CI runs: fmt, clippy, tests, build
 ```
@@ -58,16 +60,37 @@ can link:
 ./tools/build.ps1 test
 ```
 
+### Get an ISO
+
+Every push builds a bootable hybrid ISO and boots it under QEMU. Download the
+latest from the **ISO** workflow on the
+[Actions tab](../../actions/workflows/iso.yml) — the `lokoos-iso` artifact
+contains the image, its checksum, and the serial log from the boot that CI ran.
+
+To build one yourself, on Linux or macOS:
+
+```bash
+cargo xtask iso
+```
+
+This needs `xorriso`, `mtools` and `dosfstools`. None of the three exist for
+Windows in a usable form, which is why CI builds the image.
+
 ### Boot it
 
 ```bash
-cargo xtask image
-qemu-system-x86_64 -bios OVMF.fd -drive format=raw,file=fat:rw:build/esp -serial stdio
+cargo xtask boot-test          # builds the ISO and boots it, checking the serial log
 ```
 
+or by hand, with the ISO from CI:
+
+```bash
+qemu-system-x86_64 -cpu max -m 512M -cdrom lokoos-0.1.0-x86_64.iso -serial stdio -display none
+```
+
+The image is hybrid, so `dd`-ing it to a USB stick also works on real hardware.
 The kernel narrates every boot stage to the serial port, so `-serial stdio`
-shows exactly how far it gets. If you are the first person to see it come up,
-please update [STATUS.md](documentation/STATUS.md).
+shows exactly how far it gets.
 
 ---
 

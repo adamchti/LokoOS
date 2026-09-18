@@ -14,6 +14,8 @@ which.
 cargo xtask test     # host tests (excludes the freestanding crates automatically)
 cargo xtask build    # kernel + bootloader
 cargo xtask image    # lay out an ESP in build/esp
+cargo xtask iso      # build a bootable hybrid ISO in build/
+cargo xtask boot-test # build the ISO and boot it under QEMU
 cargo xtask size     # measure against the 2 GB budget
 cargo xtask check    # fmt --check, clippy, test, build. What CI runs
 ```

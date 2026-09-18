@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 mod budget;
+mod iso;
+mod qemu;
 mod toolchain;
 
 /// Crates that are freestanding and must never be built for the host.
@@ -35,7 +37,9 @@ fn main() -> ExitCode {
         "build" => build_all(release),
         "kernel" => build_kernel(release).map(|_| ()),
         "bootloader" => build_bootloader(release).map(|_| ()),
-        "image" => image(release),
+        "image" => image(release).map(|_| ()),
+        "iso" => build_iso(release).map(|_| ()),
+        "boot-test" => boot_test(release),
         "size" => size(release),
         "test" => test(),
         "clippy" => clippy(),
@@ -72,6 +76,8 @@ COMMANDS:
     kernel       Build the kernel only
     bootloader   Build the bootloader only
     image        Build both and lay out an EFI system partition in build/esp
+    iso          Build a bootable hybrid ISO in build/
+    boot-test    Build the ISO and boot it under QEMU, checking the serial log
     size         Build in release and report against the 2 GB base-OS budget
     test         Run the host test suite
     clippy       Lint every crate, for its own target
@@ -211,13 +217,12 @@ fn describe(path: &Path) -> String {
     format!("{}  ({})", path.display(), budget::human_size(size))
 }
 
-/// Lays out an EFI system partition tree.
+/// Lays out an EFI system partition tree, returning its path.
 ///
-/// This produces a *directory*, not a disk image. Turning it into a bootable
-/// image needs a FAT formatter, which is the installer's job and is tracked in
-/// `documentation/STATUS.md`. Copying this tree onto an already-formatted FAT
-/// partition is enough to boot on real firmware.
-fn image(release: bool) -> Result<(), String> {
+/// This produces a *directory*, not a disk image. [`build_iso`] turns it into
+/// one. Copying the tree onto an already-formatted FAT partition is enough to
+/// boot on real firmware, which is why it stays a step of its own.
+fn image(release: bool) -> Result<PathBuf, String> {
     let bootloader = build_bootloader(release)?;
     let kernel = build_kernel(release)?;
 
@@ -252,11 +257,45 @@ fn image(release: bool) -> Result<(), String> {
     println!("  EFI/LOKO/loko-boot.efi the same binary, under its own name");
     println!("  EFI/LOKO/loko-kernel   the kernel");
     println!(
-        "\nThis is a directory tree, not a disk image. Copy it onto a FAT-formatted\n\
-         EFI system partition to boot it. Building a bootable .img needs a FAT\n\
-         formatter that does not exist yet -- see documentation/STATUS.md."
+        "\nThis is a directory tree, not a disk image. `cargo xtask iso` turns it\n\
+         into a bootable hybrid ISO; copying it onto an already-formatted EFI\n\
+         system partition works too."
     );
-    Ok(())
+    Ok(esp)
+}
+
+/// Builds a bootable hybrid ISO from the EFI system partition tree.
+fn build_iso(release: bool) -> Result<PathBuf, String> {
+    let esp = image(release)?;
+    let out_dir = workspace_root().join("build");
+
+    println!("\nBuilding a bootable ISO");
+    let iso = iso::build(&esp, &out_dir, env!("CARGO_PKG_VERSION"))?;
+
+    let size = fs::metadata(&iso).map(|m| m.len()).unwrap_or(0);
+    println!(
+        "\nISO written to {}  ({})",
+        iso.display(),
+        budget::human_size(size)
+    );
+    println!(
+        "\nBoot it with:\n\
+         \x20   qemu-system-x86_64 -cpu max -m 512M -cdrom {} -serial stdio -display none\n\
+         or write it to a USB stick with dd. It is a hybrid image, so both work.",
+        iso.display()
+    );
+    Ok(iso)
+}
+
+/// Builds the ISO and boots it under QEMU, failing if the kernel does not come
+/// up.
+///
+/// Kept out of `check` on purpose: it needs QEMU and OVMF, which most
+/// development machines do not have, and a gate that cannot run locally is a
+/// gate people learn to ignore. CI runs it on every push.
+fn boot_test(release: bool) -> Result<(), String> {
+    let iso = build_iso(release)?;
+    qemu::run(&iso, &workspace_root().join("build/boot-test"))
 }
 
 fn size(release: bool) -> Result<(), String> {
